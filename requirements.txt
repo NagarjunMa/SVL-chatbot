@@ -1,0 +1,8 @@
+streamlit
+boto3
+python-dotenv
+watchdog
+pydantic
+cryptography
+asyncio
+aiofiles 

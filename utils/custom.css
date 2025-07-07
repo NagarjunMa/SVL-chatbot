@@ -1,0 +1,70 @@
+/* Custom chat styling - More specific selectors for Streamlit */
+div[data-testid="chat-message"] {
+    background: #f5f7fa !important;
+    border-radius: 10px !important;
+    margin-bottom: 10px !important;
+    padding: 10px !important;
+}
+
+/* User messages */
+div[data-testid="chat-message"][data-testid*="user"] {
+    background: #e0f7fa !important;
+    text-align: right !important;
+}
+
+/* Assistant messages */
+div[data-testid="chat-message"]:not([data-testid*="user"]) {
+    background: #eaeaea !important;
+    text-align: left !important;
+}
+
+/* Ensure text is visible in chat messages */
+div[data-testid="chat-message"] p,
+div[data-testid="chat-message"] div,
+div[data-testid="chat-message"] span,
+.stChatMessage p,
+.stChatMessage div,
+.stChatMessage span {
+    color: #000000 !important;
+}
+
+/* Alternative selectors for different Streamlit versions */
+.stChatMessage {
+    background: #f5f7fa !important;
+    border-radius: 10px !important;
+    margin-bottom: 10px !important;
+    padding: 10px !important;
+}
+
+.stChatMessage.user {
+    background: #e0f7fa !important;
+    text-align: right !important;
+}
+
+.stChatMessage.assistant {
+    background: #eaeaea !important;
+    color: #000000 !important;
+    text-align: left !important;
+}
+
+/* Force text color for all chat content */
+.stChatMessage * {
+    color: #000000 !important;
+}
+
+/* Chat input styling */
+div[data-testid="stChatInput"] {
+    background: #f8f9fa !important;
+}
+
+/* Hide Streamlit default footer */
+footer {
+    visibility: hidden;
+}
+
+/* Additional fallback for chat messages */
+[class*="chat"] p,
+[class*="Chat"] p,
+[class*="message"] p {
+    color: #000000 !important;
+}
