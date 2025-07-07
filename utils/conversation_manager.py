@@ -10,6 +10,14 @@ from config.aws_config import get_bedrock_client, get_model_id, is_nova_model, i
 from utils.database_manager import DatabaseManager
 from utils.logger import get_logger
 
+# Knowledge base import with graceful fallback
+try:
+    from utils.knowledge_base import KnowledgeBase
+    KNOWLEDGE_BASE_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Knowledge base not available: {e}")
+    KNOWLEDGE_BASE_AVAILABLE = False
+
 logger = get_logger("conversation_manager")
 
 # --- Guardrails ---
@@ -45,9 +53,57 @@ def build_prompt(phase: str, user_input: str, memory: ConversationMemory, extra:
     """
     base_instructions = (
         "You are SVL, an empathetic but professional assistant helping users report and locate stolen vehicles. "
-        "Always protect user privacy, never request or reveal sensitive information. "
+        "Always protect user privacy, never request or reveal sensitive PERSONAL information (like SSNs, credit cards). "
+        "However, ALWAYS provide company contact information when requested - this is public information that helps users. "
         "Be concise, clear, and supportive."
     )
+    
+    # Add contact information context if the user is asking for contact details
+    contact_keywords = ["contact", "phone", "email", "call", "reach", "support", "help", "toll free", "number"]
+    ticket_keywords = ["ticket", "case", "lost", "find", "lookup", "forgot"]
+    
+    if any(keyword in user_input.lower() for keyword in contact_keywords):
+        contact_info = """
+        
+IMPORTANT: You can and should provide these SVL contact details when asked:
+
+**Customer Support:**
+- Phone: 1-800-555-0123 (24/7)
+- Email: support@svlservices.com
+
+**Emergency Hotline:**
+- Phone: 1-800-911-FIND (1-800-911-3463) (24/7)
+- Email: emergency@svlservices.com
+
+**Technical Support:**
+- Phone: 1-800-555-TECH (1-800-555-8324)
+- Email: tech@svlservices.com
+
+**Sales & Pricing:**
+- Phone: 1-800-555-SALE (1-800-555-7253)
+- Email: sales@svlservices.com
+
+**Billing Support:**
+- Phone: 1-800-555-BILL (1-800-555-2455)
+- Email: billing@svlservices.com
+
+Always provide specific contact information when users ask for it. This is public company information.
+"""
+        base_instructions += contact_info
+    
+    # Add ticket lookup assistance
+    if any(keyword in user_input.lower() for keyword in ticket_keywords):
+        ticket_info = """
+
+TICKET LOOKUP ASSISTANCE:
+If someone needs to find their ticket number:
+1. Call Customer Support at 1-800-555-0123 with their name and vehicle information
+2. Use the SVL Alert App with their phone number to recover their case
+3. Check their email for the original confirmation
+
+This is standard customer service - always provide these helpful options.
+"""
+        base_instructions += ticket_info
     
     phase_instructions = {
         "greeting": "Greet the user warmly, express empathy for their situation, and offer help with their stolen vehicle report.",
@@ -131,6 +187,22 @@ class ConversationManager:
         self.memory = ConversationMemory()
         self.db_manager = DatabaseManager()
         self.current_phase = "greeting"
+        
+        # Initialize knowledge base if available
+        self.knowledge_base = None
+        if KNOWLEDGE_BASE_AVAILABLE:
+            try:
+                self.knowledge_base = KnowledgeBase()
+                # Try to initialize the knowledge base
+                if not self.knowledge_base.is_ready():
+                    init_result = self.knowledge_base.initialize_knowledge_base()
+                    if init_result["status"] == "success":
+                        logger.info("Knowledge base initialized successfully")
+                    else:
+                        logger.warning(f"Knowledge base initialization issues: {init_result}")
+            except Exception as e:
+                logger.error(f"Failed to initialize knowledge base: {e}")
+                self.knowledge_base = None
 
     def process_user_input(self, user_input: str, phase: str, extra: Optional[Dict[str, Any]] = None) -> str:
         logger.info(f"=== Processing user input: '{user_input}' in phase: '{phase}' ===")
@@ -143,10 +215,44 @@ class ConversationManager:
             logger.warning("Forbidden content detected in user input. Blocking response.")
             return "I'm unable to assist with that request."
         
-        logger.info("Guardrails passed, building prompt...")
+        logger.info("Guardrails passed, checking knowledge base...")
+        
+        # Query knowledge base for relevant context
+        knowledge_context = None
+        if self.knowledge_base and self.knowledge_base.is_ready():
+            try:
+                # Determine query type based on phase and user input
+                query_type = self._determine_query_type(phase, user_input)
+                
+                # Query knowledge base
+                kb_result = self.knowledge_base.query_knowledge_base(
+                    user_query=user_input,
+                    query_type=query_type,
+                    include_context=True
+                )
+                
+                if kb_result["status"] == "success" and kb_result.get("total_results", 0) > 0:
+                    knowledge_context = {
+                        "knowledge_base_context": kb_result["context"],
+                        "sources": kb_result["sources"],
+                        "confidence": kb_result["confidence"]
+                    }
+                    logger.info(f"Knowledge base found {kb_result['total_results']} relevant results")
+                else:
+                    logger.info("No relevant knowledge base results found")
+                    
+            except Exception as e:
+                logger.warning(f"Knowledge base query failed: {e}")
+        
+        # Combine extra context with knowledge base context
+        combined_extra = extra or {}
+        if knowledge_context:
+            combined_extra.update(knowledge_context)
+        
+        logger.info("Building prompt with knowledge base context...")
         
         # Build prompt
-        prompt = build_prompt(phase, user_input, self.memory, extra)
+        prompt = build_prompt(phase, user_input, self.memory, combined_extra)
         logger.info(f"Prompt for Bedrock: {prompt[:200]}...")
         
         logger.info("Calling Bedrock with retries...")
@@ -265,6 +371,58 @@ class ConversationManager:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
+
+    def _determine_query_type(self, phase: str, user_input: str) -> str:
+        """
+        Determine the appropriate knowledge base query type based on phase and user input
+        
+        Args:
+            phase: Current conversation phase
+            user_input: User's input text
+            
+        Returns:
+            Query type for knowledge base
+        """
+        # Convert user input to lowercase for keyword matching
+        input_lower = user_input.lower()
+        
+        # Phase-based query type mapping
+        phase_mapping = {
+            "faq": "faq",
+            "process_explanation": "process",
+            "confirmation": "contact"
+        }
+        
+        if phase in phase_mapping:
+            return phase_mapping[phase]
+        
+        # Keyword-based detection
+        if any(keyword in input_lower for keyword in ["how to", "process", "procedure", "steps", "what happens"]):
+            return "process"
+        elif any(keyword in input_lower for keyword in ["contact", "phone", "email", "call", "reach"]):
+            return "contact"
+        elif any(keyword in input_lower for keyword in ["price", "cost", "fee", "charge", "payment"]):
+            return "faq"
+        elif any(keyword in input_lower for keyword in ["sop", "standard", "procedure", "protocol"]):
+            return "sop"
+        elif any(keyword in input_lower for keyword in ["faq", "question", "frequently", "common"]):
+            return "faq"
+        else:
+            return "general"
+    
+    def get_knowledge_base_stats(self) -> Dict[str, Any]:
+        """Get knowledge base statistics"""
+        if self.knowledge_base:
+            return self.knowledge_base.get_knowledge_base_stats()
+        else:
+            return {"status": "not_available", "message": "Knowledge base not initialized"}
+    
+    def get_knowledge_base_health(self) -> Dict[str, Any]:
+        """Get knowledge base health status"""
+        if self.knowledge_base:
+            return self.knowledge_base.get_health_status()
+        else:
+            return {"status": "unavailable", "message": "Knowledge base not initialized"}
 
     def get_memory(self) -> List[Dict[str, str]]:
         return self.memory.get_context() 

@@ -235,32 +235,40 @@ class DatabaseManager:
         try:
             ticket_id = self.generate_ticket_id()
             
-            # Encrypt sensitive information
-            encrypted_owner_info = OwnerInfo(
-                name=owner_info.name,
-                phone=self.encryption_manager.encrypt(owner_info.phone),
-                email=self.encryption_manager.encrypt(owner_info.email),
-                address=self.encryption_manager.encrypt(owner_info.address)
-            )
-            
+            # IMPORTANT: Create ticket with original (unencrypted) data first for validation
             ticket = Ticket(
                 ticket_id=ticket_id,
                 user_id=user_id,
                 vehicle_info=vehicle_info,
-                owner_info=encrypted_owner_info,
+                owner_info=owner_info,  # Use original data for validation
                 incident_info=incident_info,
                 insurance_info=insurance_info
             )
             
+            # Convert to dict and prepare for storage
             item = ticket.dict()
             item['created_at'] = ticket.created_at.isoformat()
             item['updated_at'] = ticket.updated_at.isoformat()
+            
+            # Convert datetime objects in incident_info to ISO format strings for DynamoDB
+            if 'incident_info' in item:
+                if 'incident_date' in item['incident_info'] and hasattr(item['incident_info']['incident_date'], 'isoformat'):
+                    item['incident_info']['incident_date'] = item['incident_info']['incident_date'].isoformat()
+                if 'incident_time' in item['incident_info'] and hasattr(item['incident_info']['incident_time'], 'isoformat'):
+                    item['incident_info']['incident_time'] = item['incident_info']['incident_time'].isoformat()
+            
+            # NOW encrypt sensitive information only for storage
+            item['owner_info']['phone'] = self.encryption_manager.encrypt(owner_info.phone)
+            item['owner_info']['email'] = self.encryption_manager.encrypt(owner_info.email)
+            item['owner_info']['address'] = self.encryption_manager.encrypt(owner_info.address)
             
             table = self.dynamodb.Table(TABLES['tickets']['TableName'])
             table.put_item(Item=item)
             
             self._log_audit("CREATE", "tickets", ticket_id, user_id)
             logger.info(f"Created ticket: {ticket_id}")
+            
+            # Return the ticket with original (unencrypted) data for immediate use
             return ticket
             
         except Exception as e:

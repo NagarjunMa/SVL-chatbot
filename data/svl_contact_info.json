@@ -1,0 +1,99 @@
+{
+    "company_info": {
+        "name": "Stolen Vehicle Locator (SVL) Services",
+        "tagline": "Advanced Vehicle Recovery Solutions",
+        "description": "Leading provider of stolen vehicle tracking, recovery, and alert services using cutting-edge GPS technology and real-time monitoring."
+    },
+    "contact_information": {
+        "customer_support": {
+            "email": "support@svlservices.com",
+            "phone": "1-800-555-0123",
+            "hours": "24/7 Customer Support",
+            "description": "General inquiries, account support, and service questions"
+        },
+        "emergency_hotline": {
+            "email": "emergency@svlservices.com",
+            "phone": "1-800-911-FIND (1-800-911-3463)",
+            "hours": "24/7 Emergency Response",
+            "description": "Immediate assistance for stolen vehicle reports and emergency situations"
+        },
+        "technical_support": {
+            "email": "tech@svlservices.com",
+            "phone": "1-800-555-TECH (1-800-555-8324)",
+            "hours": "Monday-Friday 8AM-8PM EST, Weekend 9AM-5PM EST",
+            "description": "Device installation, app troubleshooting, and technical issues"
+        },
+        "sales_inquiries": {
+            "email": "sales@svlservices.com",
+            "phone": "1-800-555-SALE (1-800-555-7253)",
+            "hours": "Monday-Friday 9AM-7PM EST",
+            "description": "New subscriptions, package upgrades, and pricing information"
+        },
+        "enterprise_solutions": {
+            "email": "enterprise@svlservices.com",
+            "phone": "1-800-555-CORP (1-800-555-2677)",
+            "hours": "Monday-Friday 9AM-6PM EST",
+            "description": "Fleet management, corporate accounts, and bulk service plans"
+        },
+        "billing_support": {
+            "email": "billing@svlservices.com",
+            "phone": "1-800-555-BILL (1-800-555-2455)",
+            "hours": "Monday-Friday 9AM-6PM EST",
+            "description": "Payment issues, billing questions, and account management"
+        }
+    },
+    "service_hours": {
+        "emergency_response": "24/7/365 - Always Available",
+        "customer_support": "24/7/365 - Always Available",
+        "technical_support": "Monday-Friday 8AM-8PM EST, Weekends 9AM-5PM EST",
+        "business_support": "Monday-Friday 9AM-6PM EST"
+    },
+    "response_times": {
+        "emergency_calls": "Immediate response within 2 minutes",
+        "customer_support": "Average response time under 30 seconds",
+        "technical_support": "Average response time under 5 minutes",
+        "email_support": "Response within 2 hours during business hours"
+    },
+    "additional_contact_methods": {
+        "live_chat": "Available on website 24/7",
+        "mobile_app": "SVL Alert App - Push notifications and in-app messaging",
+        "social_media": {
+            "twitter": "@SVLServices",
+            "facebook": "facebook.com/SVLServices",
+            "linkedin": "linkedin.com/company/svl-services"
+        }
+    },
+    "office_locations": {
+        "headquarters": {
+            "address": "123 Recovery Drive, Tech Center, TX 75001",
+            "phone": "1-800-555-0123",
+            "hours": "Monday-Friday 9AM-6PM EST"
+        },
+        "regional_offices": [
+            {
+                "region": "West Coast",
+                "address": "456 Innovation Blvd, San Francisco, CA 94102",
+                "phone": "1-800-555-WEST"
+            },
+            {
+                "region": "East Coast",
+                "address": "789 Security Lane, New York, NY 10001",
+                "phone": "1-800-555-EAST"
+            }
+        ]
+    },
+    "frequently_requested": {
+        "lost_ticket_lookup": {
+            "method": "Call customer support at 1-800-555-0123 with your name and vehicle information",
+            "alternative": "Use the SVL Alert App with your phone number to recover your case"
+        },
+        "urgent_assistance": {
+            "emergency_line": "1-800-911-FIND (1-800-911-3463)",
+            "when_to_call": "Vehicle theft, immediate danger, or time-sensitive recovery situations"
+        },
+        "general_pricing": {
+            "contact": "sales@svlservices.com or 1-800-555-SALE",
+            "note": "Pricing varies by package and coverage area - contact for current rates"
+        }
+    }
+}

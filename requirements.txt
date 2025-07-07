@@ -1,8 +1,22 @@
+# Core dependencies
 streamlit
 boto3
 python-dotenv
-watchdog
 pydantic
-cryptography
-asyncio
-aiofiles 
+cryptography>=41.0.8
+requests
+
+# File processing
+aiofiles
+watchdog
+
+# PDF processing and knowledge base
+PyPDF2>=3.0.1
+pdfplumber>=0.10.0
+faiss-cpu>=1.7.4
+numpy>=1.24.0
+
+# Security and compliance dependencies
+bleach>=6.1.0
+pycryptodome>=3.19.0
+PyJWT 

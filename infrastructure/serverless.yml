@@ -1,0 +1,191 @@
+service: svl-chatbot-lambda
+
+provider:
+  name: aws
+  runtime: python3.9
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  timeout: 30
+  memorySize: 256
+
+  environment:
+    DYNAMODB_TABLE_PREFIX: svl-${self:provider.stage}
+    AWS_REGION: ${self:provider.region}
+    BEDROCK_MODEL_ID: ${env:BEDROCK_MODEL_ID, 'amazon.nova-pro-v1:0'}
+    KNOWLEDGE_BASE_ID: ${env:KNOWLEDGE_BASE_ID, ''}
+
+  iamRoleStatements:
+    # DynamoDB permissions
+    - Effect: Allow
+      Action:
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+        - dynamodb:CreateTable
+        - dynamodb:DescribeTable
+      Resource:
+        - "arn:aws:dynamodb:${self:provider.region}:*:table/svl-${self:provider.stage}-*"
+        - "arn:aws:dynamodb:${self:provider.region}:*:table/svl-${self:provider.stage}-*/index/*"
+
+    # Bedrock permissions
+    - Effect: Allow
+      Action:
+        - bedrock:InvokeModel
+        - bedrock:InvokeModelWithResponseStream
+      Resource:
+        - "arn:aws:bedrock:${self:provider.region}::foundation-model/amazon.nova-pro-v1:0"
+        - "arn:aws:bedrock:${self:provider.region}::foundation-model/anthropic.*"
+
+    # Bedrock Knowledge Base permissions (for future use)
+    - Effect: Allow
+      Action:
+        - bedrock:Retrieve
+        - bedrock-agent:Retrieve
+      Resource: "*"
+
+    # Lambda permissions for function invocation
+    - Effect: Allow
+      Action:
+        - lambda:InvokeFunction
+      Resource:
+        - "arn:aws:lambda:${self:provider.region}:*:function:${self:service}-${self:provider.stage}-*"
+
+functions:
+  bedrockOrchestrator:
+    handler: bedrock_orchestrator.lambda_handler
+    description: Main Bedrock orchestration handler for SVL chatbot
+    events:
+      - http:
+          path: /chat
+          method: post
+          cors: true
+    environment:
+      FUNCTION_NAME: bedrock-orchestrator
+
+  requestPreprocessor:
+    handler: request_preprocessor.lambda_handler
+    description: Request validation and sanitization
+    timeout: 10
+    memorySize: 128
+    environment:
+      FUNCTION_NAME: request-preprocessor
+
+  ticketGenerator:
+    handler: ticket_generator.lambda_handler
+    description: Ticket generation with unique SVL IDs
+    events:
+      - http:
+          path: /ticket
+          method: post
+          cors: true
+    environment:
+      FUNCTION_NAME: ticket-generator
+
+  knowledgeBaseQuery:
+    handler: knowledge_base_query.lambda_handler
+    description: Knowledge base context retrieval
+    timeout: 15
+    environment:
+      FUNCTION_NAME: knowledge-base-query
+
+  responseFormatter:
+    handler: response_formatter.lambda_handler
+    description: Basic response formatting
+    timeout: 10
+    memorySize: 128
+    environment:
+      FUNCTION_NAME: response-formatter
+
+# DynamoDB Tables
+resources:
+  Resources:
+    ConversationsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: svl-${self:provider.stage}-conversations
+        AttributeDefinitions:
+          - AttributeName: conversation_id
+            AttributeType: S
+          - AttributeName: timestamp
+            AttributeType: S
+          - AttributeName: user_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: conversation_id
+            KeyType: HASH
+          - AttributeName: timestamp
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: user_id-index
+            KeySchema:
+              - AttributeName: user_id
+                KeyType: HASH
+              - AttributeName: timestamp
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+        BillingMode: PAY_PER_REQUEST
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+
+    TicketsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: svl-${self:provider.stage}-tickets
+        AttributeDefinitions:
+          - AttributeName: ticket_id
+            AttributeType: S
+          - AttributeName: created_at
+            AttributeType: S
+          - AttributeName: user_id
+            AttributeType: S
+          - AttributeName: status
+            AttributeType: S
+        KeySchema:
+          - AttributeName: ticket_id
+            KeyType: HASH
+          - AttributeName: created_at
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: user_id-index
+            KeySchema:
+              - AttributeName: user_id
+                KeyType: HASH
+              - AttributeName: created_at
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+          - IndexName: status-index
+            KeySchema:
+              - AttributeName: status
+                KeyType: HASH
+              - AttributeName: created_at
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+        BillingMode: PAY_PER_REQUEST
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+
+# API Gateway CORS configuration
+custom:
+  serverless-offline:
+    httpPort: 3000
+
+# Plugins
+plugins:
+  - serverless-offline
+  - serverless-python-requirements
+
+# Package configuration
+package:
+  patterns:
+    - "!.git/**"
+    - "!.vscode/**"
+    - "!node_modules/**"
+    - "!.env"
+    - "!README.md"
+    - "!*.md"
