@@ -580,13 +580,20 @@ with st.container():
                         cm = st.session_state["conversation_manager"]
                         response = cm.process_user_input(sanitized_input, phase)
                 else:
-                    # Use ConversationManager directly (WORKING VERSION)
+                    # Use ConversationManagerWithObservability (OBSERVABILITY ENABLED)
                     with st.spinner("Processing your message..."):
                         phase = get_phase()
-                        logger.info(f"Using ConversationManager directly in phase: {phase}")
+                        logger.info(f"Using ConversationManagerWithObservability in phase: {phase}")
                         
                         cm = st.session_state["conversation_manager"]
-                        response = cm.process_user_input(sanitized_input, phase)
+                        
+                        # Check if this is the observability-enabled manager
+                        if hasattr(cm, 'process_user_message'):
+                            # This is ConversationManagerWithObservability - use async method
+                            response = asyncio.run(cm.process_user_message(sanitized_input))
+                        else:
+                            # Fallback to regular ConversationManager
+                            response = cm.process_user_input(sanitized_input, phase)
                 
                 # Add assistant response
                 append_message("assistant", response)

@@ -67,6 +67,23 @@ class ConversationManagerWithObservability:
         # Load conversation history
         self._load_conversation_history()
     
+    @trace_function("ensure_conversation_exists")
+    async def _ensure_conversation_exists(self):
+        """Ensure conversation exists in database, create if it doesn't"""
+        try:
+            # Check if conversation exists
+            conversation = await self.db.get_conversation(self.session_id)
+            if not conversation:
+                # Create new conversation
+                conversation = await self.db.create_conversation("anonymous")
+                # Update session_id to match the created conversation
+                self.session_id = conversation.conversation_id
+                logger.info(f"Created new conversation: {self.session_id}")
+        except Exception as e:
+            logger.error(f"Failed to ensure conversation exists: {e}")
+            # Create a fallback conversation ID that won't conflict
+            self.session_id = f"fallback-{self.session_id}"
+    
     @trace_function("process_user_message")
     async def process_user_message(self, user_input: str) -> str:
         """Process user message with full observability"""
@@ -75,6 +92,9 @@ class ConversationManagerWithObservability:
         
         with observability.trace_operation("user_message_processing") as span:
             try:
+                # Ensure conversation exists in database first
+                await self._ensure_conversation_exists()
+                
                 span['metadata'] = {
                     'user_input_length': len(user_input),
                     'session_id': self.session_id,
@@ -99,10 +119,11 @@ class ConversationManagerWithObservability:
                 })
                 
                 # Save user message to database
+                from data.models import Message
+                user_message = Message(role='user', content=user_input)
                 await self.db.add_message_to_conversation(
                     self.session_id, 
-                    'user', 
-                    user_input
+                    user_message
                 )
                 
                 # Get knowledge base context
@@ -146,10 +167,10 @@ class ConversationManagerWithObservability:
                 })
                 
                 # Save assistant response to database
+                assistant_message = Message(role='assistant', content=response)
                 await self.db.add_message_to_conversation(
                     self.session_id, 
-                    'assistant', 
-                    response
+                    assistant_message
                 )
                 
                 # Calculate response time
@@ -520,4 +541,219 @@ Please provide helpful information about vehicle theft reporting and recovery se
         if self.knowledge_base:
             return self.knowledge_base.check_knowledge_base_status()
         else:
-            return {"status": "unavailable", "message": "Bedrock Knowledge base not initialized"} 
+            return {"status": "unavailable", "message": "Bedrock Knowledge base not initialized"}
+    
+    @trace_function("get_knowledge_context")
+    async def _get_knowledge_context(self, user_input: str) -> Dict[str, Any]:
+        """Get knowledge base context for user input"""
+        try:
+            if not self.knowledge_base:
+                return {"results": [], "context": None}
+            
+            # Query knowledge base using Bedrock API
+            kb_result = self.knowledge_base.query_knowledge_base(
+                query=user_input,
+                max_results=3,
+                similarity_threshold=0.7
+            )
+            
+            if kb_result["status"] == "success" and kb_result.get("total_results", 0) > 0:
+                # Build context from results
+                context_parts = []
+                sources = []
+                
+                for result in kb_result["results"]:
+                    context_parts.append(f"Source: {result['source']}\nContent: {result['text']}")
+                    sources.append({
+                        "source": result["source"],
+                        "title": result["document_title"],
+                        "score": result["score"]
+                    })
+                
+                return {
+                    "results": kb_result["results"],
+                    "context": "\n\n".join(context_parts),
+                    "sources": sources,
+                    "confidence": sum(r["score"] for r in kb_result["results"]) / len(kb_result["results"])
+                }
+            else:
+                return {"results": [], "context": None}
+                
+        except Exception as e:
+            logger.error(f"Knowledge base query failed: {e}")
+            observability.log_error(e, {
+                'operation': 'knowledge_base_query',
+                'session_id': self.session_id,
+                'query': user_input[:100]
+            })
+            return {"results": [], "context": None}
+    
+    @trace_function("call_bedrock_model")
+    async def _call_bedrock_model(self, prompt: str) -> str:
+        """Call Bedrock model with observability"""
+        try:
+            # Prepare request for Nova Pro
+            request_body = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "text": prompt
+                            }
+                        ]
+                    }
+                ],
+                "inferenceConfig": {
+                    "max_new_tokens": 1000,
+                    "temperature": 0.1,
+                    "top_p": 0.9
+                }
+            }
+            
+            # Log Bedrock operation
+            observability.log_bedrock_operation(
+                operation_type='llm_invoke',
+                model_id='amazon.nova-pro-v1:0',
+                input_data={
+                    'prompt': prompt[:500],  # Truncate for logging
+                    'max_tokens': 1000,
+                    'temperature': 0.1
+                }
+            )
+            
+            # Make the API call
+            start_time = time.time()
+            response = self.bedrock_client.invoke_model(
+                modelId="amazon.nova-pro-v1:0",
+                body=json.dumps(request_body),
+                contentType="application/json"
+            )
+            api_duration = time.time() - start_time
+            
+            # Parse response
+            response_body = json.loads(response['body'].read())
+            
+            # Extract text from Nova Pro response
+            if 'output' in response_body and 'message' in response_body['output']:
+                message = response_body['output']['message']
+                if 'content' in message and len(message['content']) > 0:
+                    response_text = message['content'][0].get('text', '')
+                else:
+                    response_text = "I'm sorry, I couldn't generate a response. Please try again."
+            else:
+                response_text = "I'm sorry, I couldn't generate a response. Please try again."
+            
+            # Log successful Bedrock operation
+            observability.log_bedrock_operation(
+                operation_type='llm_invoke_response',
+                model_id='amazon.nova-pro-v1:0',
+                input_data={'prompt_length': len(prompt)},
+                output_data={'text': response_text[:500]},  # Truncate for logging
+                metrics={
+                    'api_duration_seconds': api_duration,
+                    'response_length': len(response_text)
+                }
+            )
+            
+            return response_text
+            
+        except Exception as e:
+            logger.error(f"Bedrock API call failed: {e}")
+            observability.log_error(e, {
+                'operation': 'bedrock_api_call',
+                'session_id': self.session_id
+            })
+            return "I'm sorry, I'm experiencing technical difficulties. Please try again in a moment."
+    
+    @trace_function("check_content_guardrails")
+    def _check_content_guardrails(self, user_input: str) -> Dict[str, Any]:
+        """Check content against guardrails"""
+        try:
+            # Enhanced PII patterns
+            pii_patterns = [
+                # SSN patterns
+                r"\b\d{3}-\d{2}-\d{4}\b",  # XXX-XX-XXXX
+                r"\b\d{9}\b",               # XXXXXXXXX
+                
+                # Credit card patterns  
+                r"\b\d{16}\b",              # 16 digits
+                r"\b\d{4}[-\s]\d{4}[-\s]\d{4}[-\s]\d{4}\b",  # XXXX-XXXX-XXXX-XXXX
+                
+                # Email patterns (more comprehensive)
+                r"\b[A-Z0-9._%+\-*]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b",  # Standard email + asterisks (escaped -)
+                r"\b[*]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b",             # ***@domain.com
+                r"\b[A-Z0-9._%+\-]+@[*]+\.[A-Z]{2,}\b",          # user@***.com
+                r"email[:\s]*[A-Z0-9._%+\-*@]+",                 # "email: user@domain"
+                
+                # Phone number patterns
+                r"\b\d{10}\b",                                  # 1234567890
+                r"\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b",            # XXX-XXX-XXXX
+                r"\(\d{3}\)\s*\d{3}[-.\s]\d{4}",               # (XXX) XXX-XXXX
+                
+                # Other PII indicators
+                r"\b(my|the)\s+(email|phone|number|address|ssn)\b",  # "my email", "the phone"
+            ]
+            
+            # Check for PII
+            for i, pattern in enumerate(pii_patterns):
+                if re.search(pattern, user_input, re.IGNORECASE):
+                    pattern_type = "unknown"
+                    if i <= 1:
+                        pattern_type = "ssn"
+                    elif i <= 3:
+                        pattern_type = "credit_card"
+                    elif i <= 7:
+                        pattern_type = "email"
+                    elif i <= 10:
+                        pattern_type = "phone"
+                    else:
+                        pattern_type = "personal_info"
+                    
+                    return {
+                        'blocked': True,
+                        'reason': f'pii_detected_{pattern_type}',
+                        'confidence': 0.9,
+                        'message': "For your safety, please do not share sensitive personal information such as emails, phone numbers, or other private details."
+                    }
+            
+            # Forbidden content patterns
+            forbidden_patterns = [
+                r"\b(violence|threat|abuse|illegal|offensive)\b"
+            ]
+            
+            # Check for forbidden content
+            for pattern in forbidden_patterns:
+                if re.search(pattern, user_input, re.IGNORECASE):
+                    return {
+                        'blocked': True,
+                        'reason': 'forbidden_content',
+                        'confidence': 0.8,
+                        'message': "I can't help with that request. Please ask something related to vehicle recovery services."
+                    }
+            
+            # Length check
+            if len(user_input) > 4000:
+                return {
+                    'blocked': True,
+                    'reason': 'input_too_long',
+                    'confidence': 1.0,
+                    'message': "Your message is too long. Please keep it under 4000 characters."
+                }
+            
+            return {
+                'blocked': False,
+                'reason': 'passed_all_checks',
+                'confidence': 1.0,
+                'message': None
+            }
+            
+        except Exception as e:
+            logger.error(f"Guardrails check failed: {e}")
+            # Err on the side of caution
+            return {
+                'blocked': True,
+                'reason': 'guardrails_error',
+                'confidence': 0.5,
+                'message': "I'm having trouble processing your request. Please try again."
+            } 

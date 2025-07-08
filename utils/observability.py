@@ -58,6 +58,8 @@ class SVLObservability:
             self.cloudwatch_logs = boto3.client('logs', region_name='us-east-1')
             self.cloudwatch = boto3.client('cloudwatch', region_name='us-east-1')
             self.active_traces = {}
+            self.current_trace = None
+            self.service_name = "svl-chatbot"
             
             # Production CloudWatch log groups
             self.log_groups = {
@@ -97,13 +99,13 @@ class SVLObservability:
         
         for log_group in log_groups:
             try:
-                cloudwatch_logs.create_log_group(logGroupName=log_group)
+                self.cloudwatch_logs.create_log_group(logGroupName=log_group)
                 # Set retention policy (30 days)
-                cloudwatch_logs.put_retention_policy(
+                self.cloudwatch_logs.put_retention_policy(
                     logGroupName=log_group,
                     retentionInDays=30
                 )
-            except cloudwatch_logs.exceptions.ResourceAlreadyExistsException:
+            except self.cloudwatch_logs.exceptions.ResourceAlreadyExistsException:
                 pass  # Log group already exists
             except Exception as e:
                 print(f"Error creating log group {log_group}: {e}")
@@ -191,6 +193,20 @@ class SVLObservability:
                     'metadata': span['metadata'],
                     'timestamp': start_time.isoformat()
                 }, log_group='/aws/lambda/svl-chatbot/performance')
+        else:
+            # No active trace - just yield a dummy span for compatibility
+            dummy_span = {
+                'span_id': 'no-trace',
+                'operation_name': operation_name,
+                'metadata': metadata,
+                'status': 'success'
+            }
+            try:
+                yield dummy_span
+            except Exception as e:
+                dummy_span['status'] = 'error'
+                dummy_span['error'] = str(e)
+                raise
     
     def log_conversation(self, conversation_data: Dict[str, Any]):
         """Log ALL conversation activities to CloudWatch with PII masking"""
@@ -411,15 +427,15 @@ class SVLObservability:
             
             # Create log stream if it doesn't exist
             try:
-                cloudwatch_logs.create_log_stream(
+                self.cloudwatch_logs.create_log_stream(
                     logGroupName=log_group,
                     logStreamName=log_stream
                 )
-            except cloudwatch_logs.exceptions.ResourceAlreadyExistsException:
+            except self.cloudwatch_logs.exceptions.ResourceAlreadyExistsException:
                 pass
             
             # Send log event
-            cloudwatch_logs.put_log_events(
+            self.cloudwatch_logs.put_log_events(
                 logGroupName=log_group,
                 logStreamName=log_stream,
                 logEvents=[{
