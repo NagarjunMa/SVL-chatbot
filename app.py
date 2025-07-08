@@ -11,6 +11,10 @@ from utils.data_utils import DataValidator, PIIHandler, ComplianceLogger
 from utils.conversation_orchestrator import ConversationOrchestrator
 from data.models import Message, VehicleInfo, OwnerInfo, IncidentInfo, InsuranceInfo, Ticket
 
+# Import observability
+from utils.observability import observability, trace_function
+from utils.conversation_manager_with_observability import ConversationManagerWithObservability
+
 # Security framework imports
 from utils.security_integration import get_security_manager, SecurityConfig, SecurityLevel
 from utils.session_security import get_session_manager, SessionSecurityLevel
@@ -120,16 +124,25 @@ if "db_manager" not in st.session_state:
         st.error("Critical error: Unable to connect to database.")
         st.stop()
 
-# Initialize ConversationManager in session state
+# Initialize ConversationManager with Observability in session state
 if "conversation_manager" not in st.session_state:
     try:
-        st.session_state["conversation_manager"] = get_conversation_manager(
-            session_id=st.session_state.get("conversation_id", "default-session")
-        )
+        # Use observability-enabled conversation manager
+        session_id = st.session_state.get("conversation_id", "default-session")
+        st.session_state["conversation_manager"] = ConversationManagerWithObservability(session_id)
+        logger.info(f"Observability-enabled conversation manager initialized for session: {session_id}")
     except Exception as e:
-        logger.error(f"Failed to initialize ConversationManager: {e}")
-        st.error("Critical error: Unable to connect to AI service.")
-        st.stop()
+        logger.error(f"Failed to initialize ConversationManager with Observability: {e}")
+        # Fallback to regular conversation manager
+        try:
+            st.session_state["conversation_manager"] = get_conversation_manager(
+                session_id=st.session_state.get("conversation_id", "default-session")
+            )
+            logger.info("Fallback to regular conversation manager")
+        except Exception as e2:
+            logger.error(f"Failed to initialize fallback ConversationManager: {e2}")
+            st.error("Critical error: Unable to connect to AI service.")
+            st.stop()
 
 # Initialize Conversation Orchestrator
 if "orchestrator" not in st.session_state:
@@ -290,46 +303,69 @@ with st.sidebar:
             with col2:
                 st.metric("Threats", metrics.get("threats_detected", 0))
             with col3:
-                st.metric("Responses", metrics.get("automated_responses", 0))
+                st.metric("Quarantined", metrics.get("quarantined_sessions", 0))
             
-            # Recent Security Events
-            recent_threats = monitoring_data.get("recent_threats", [])
-            if recent_threats:
-                st.markdown("**⚠️ Recent Security Events**")
-                for threat in recent_threats[-3:]:  # Show last 3
-                    threat_level = threat.get("threat_level", "info")
-                    status = threat.get("status", "unknown")
-                    
-                    if threat_level == "critical":
-                        icon = "🔴"
-                    elif threat_level == "high":
-                        icon = "🟠"
-                    elif threat_level == "medium":
-                        icon = "🟡"
-                    else:
-                        icon = "🔵"
-                    
-                    st.caption(f"{icon} {threat.get('title', 'Unknown')} ({status})")
+            # Real-time threat level
+            threat_level = monitoring_data.get("current_threat_level", "low")
+            if threat_level == "low":
+                st.success("🟢 **Threat Level: LOW**")
+            elif threat_level == "medium":
+                st.warning("🟡 **Threat Level: MEDIUM**")
             else:
-                st.info("🟢 No recent security incidents")
+                st.error("🔴 **Threat Level: HIGH**")
+                
+        except Exception as e:
+            st.error("Security monitoring unavailable")
+    
+    # Observability Dashboard
+    with st.expander("📊 Observability Dashboard", expanded=False):
+        try:
+            # Get observability status
+            observability_status = observability.get_status()
             
-            # Security Actions
-            st.markdown("**🔧 Security Actions**")
+            st.markdown("**🔍 System Observability**")
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.button("🔄 Refresh Status"):
-                    st.rerun()
-                    
+                if observability_status.get("active", False):
+                    st.success("🟢 Active")
+                else:
+                    st.error("🔴 Inactive")
+                st.caption("Monitoring Active")
+                
+                traces_count = observability_status.get("active_traces", 0)
+                st.metric("Active Traces", traces_count)
+                
             with col2:
+                logs_count = observability_status.get("logs_sent", 0)
+                st.metric("Logs Sent", logs_count)
+                
+                errors_count = observability_status.get("errors_logged", 0)
+                if errors_count == 0:
+                    st.success(f"🟢 {errors_count}")
+                else:
+                    st.warning(f"🟡 {errors_count}")
+                st.caption("Errors Today")
+            
+            # CloudWatch Dashboard Link
+            st.markdown("**🌐 AWS CloudWatch Dashboard**")
+            cloudwatch_url = "https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=SVL-Observability-Dashboard"
+            
+            if st.button("🚀 Open CloudWatch Dashboard"):
+                st.markdown(f'<a href="{cloudwatch_url}" target="_blank">Open SVL Observability Dashboard</a>', unsafe_allow_html=True)
+                st.info("📈 CloudWatch dashboard opened in new tab")
+            
+            st.markdown("**📋 Quick Links**")
+            col1, col2 = st.columns(2)
+            with col1:
                 if st.button("📊 View Metrics"):
-                    # Show detailed metrics in expander
-                    with st.expander("Detailed Security Metrics", expanded=True):
-                        st.json(security_status)
-                        
+                    st.info("Real-time metrics available in CloudWatch")
+            with col2:
+                if st.button("🔍 Search Logs"):
+                    st.info("Search logs in CloudWatch Logs")
+                    
         except Exception as e:
-            st.error("Security dashboard unavailable")
-            logger.error(f"Security dashboard error: {e}")
+            st.error("Observability monitoring unavailable")
     
     # Compliance Features
     with st.expander("📋 Data Rights (GDPR/CCPA)", expanded=False):

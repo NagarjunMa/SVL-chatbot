@@ -1,69 +1,158 @@
-# Stolen Vehicle Locator (SVL) Chatbot
+# SVL Chatbot - Production Ready
 
-A professional AI-powered chatbot for reporting and tracking stolen vehicles, built with Streamlit and AWS Bedrock.
+## Quick Start
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+## CloudWatch Monitoring
+- **Dashboard**: https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=SVL-Chatbot-Comprehensive-Monitoring
+- **Conversations**: https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/%2Faws%2Fsvl%2Fconversation
+- **Setup**: `python infrastructure/cloudwatch_setup.py`
 
 ## Features
+- Stolen vehicle reporting and tracking
+- AWS Bedrock AI integration
+- Knowledge base with PDF processing
+- Comprehensive CloudWatch logging with PII masking
+- Real-time conversation monitoring
+- Security and compliance features
 
-- **Professional Chat Interface**: Clean, responsive design with typing animations
-- **Multi-Step Vehicle Reporting**: Guided form for comprehensive incident documentation
-- **AI-Powered Conversations**: Integrated with AWS Bedrock supporting multiple models:
-  - Amazon Nova Pro (default)
-  - Anthropic Claude 3.5 Sonnet
-  - Anthropic Claude 3 Haiku
-- **Comprehensive Data Management**: DynamoDB integration with encrypted sensitive data
-- **PII Protection**: Automatic detection, masking, and secure handling of sensitive information
-- **Audit Trails**: Complete logging and compliance tracking
-- **Data Export**: CSV and JSON export capabilities
-- **Session Management**: Persistent conversations with memory
-- **Error Handling**: Robust error handling with retry logic
+## Key Components
+- `app.py` - Main Streamlit application
+- `utils/` - Core functionality (conversation, security, observability)
+- `data/` - Knowledge base documents and models
+- `infrastructure/` - AWS setup scripts
+- `config/` - Configuration files
 
-## Installation
+## Environment Variables
+```bash
+AWS_ACCESS_KEY_ID=your_key
+AWS_SECRET_ACCESS_KEY=your_secret  
+AWS_DEFAULT_REGION=us-east-1
+```
 
-1. **Clone the repository**:
+## Production Deployment
+
+### Prerequisites
+- Python 3.9+ installed
+- AWS CLI configured with your credentials
+- AWS account with Bedrock access enabled
+
+### Step-by-Step Setup
+1. **Clone and Install Dependencies**
    ```bash
-   git clone <repository-url>
+   git clone <your-repo-url>
    cd svl-chatbot
-   ```
-
-2. **Install dependencies**:
-   ```bash
    pip install -r requirements.txt
    ```
 
-3. **Configure environment variables**:
-   Create a `.env` file in the project root:
-   ```env
-   # AWS Configuration
-   AWS_ACCESS_KEY_ID=your_aws_access_key_here
-   AWS_SECRET_ACCESS_KEY=your_aws_secret_key_here
-   AWS_REGION=us-east-1
-
-   # Bedrock Model Configuration
-   # For Amazon Nova Pro (default): amazon.nova-pro-v1:0
-   # For Claude 3.5 Sonnet: anthropic.claude-3-5-sonnet-20241022-v2:0
-   # For Claude 3 Haiku: anthropic.claude-3-haiku-20240307-v1:0
-   BEDROCK_MODEL_ID=amazon.nova-pro-v1:0
-
-   # Database Configuration
-   DYNAMODB_TABLE_PREFIX=svl
-
-   # Encryption Configuration (32 character key)
-   ENCRYPTION_KEY=your_32_character_encryption_key
-
-   # Application Configuration
-   DEBUG=false
-   LOG_LEVEL=INFO
+2. **Configure Environment Variables**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your AWS credentials and configuration
    ```
 
-4. **Set up AWS credentials**:
-   Ensure your AWS credentials have access to:
-   - Amazon Bedrock (for AI model access)
-   - DynamoDB (for data storage)
+3. **Set up AWS Infrastructure**
+   ```bash
+   python infrastructure/aws_setup.py
+   python infrastructure/cloudwatch_setup.py
+   ```
 
-5. **Run the application**:
+4. **Run the Application**
    ```bash
    streamlit run app.py
    ```
+
+### Required AWS Permissions
+Your AWS credentials need permissions for:
+- Bedrock (invoke models, create knowledge bases)
+- DynamoDB (create tables, read/write)
+- S3 (create buckets, upload files)
+- OpenSearch (create domains)
+- CloudWatch (create log groups, metrics)
+- IAM (create roles for services)
+
+### Deployment Verification
+After setup, verify everything works:
+
+1. **Test Application Launch**
+   ```bash
+   streamlit run app.py
+   # Should start without errors on http://localhost:8501
+   ```
+
+2. **Verify AWS Services**
+   ```bash
+   # Check if DynamoDB tables exist
+   aws dynamodb list-tables --region us-east-1
+   
+   # Check CloudWatch log groups
+   aws logs describe-log-groups --region us-east-1 | grep svl
+   ```
+
+3. **Test Basic Functionality**
+   - Open http://localhost:8501
+   - Send a test message like "Hello"
+   - Check if response is generated
+   - Verify logs appear in CloudWatch
+
+### Troubleshooting Common Issues
+
+#### 1. AWS Credentials Issues
+```bash
+# Error: Unable to locate credentials
+# Solution: Configure AWS credentials
+aws configure
+# OR set environment variables in .env file
+```
+
+#### 2. Missing Dependencies
+```bash
+# Error: ModuleNotFoundError
+# Solution: Install all dependencies
+pip install -r requirements.txt
+```
+
+#### 3. Bedrock Access Issues
+```bash
+# Error: Access denied for Bedrock
+# Solution: Request Bedrock access in AWS Console
+# Go to AWS Bedrock console -> Model access -> Request access
+```
+
+#### 4. DynamoDB Permission Issues
+```bash
+# Error: User not authorized to perform dynamodb operations
+# Solution: Add DynamoDB permissions to your IAM user/role
+```
+
+#### 5. CloudWatch Setup Issues
+```bash
+# Error: Log group creation failed
+# Solution: Ensure CloudWatch permissions and run setup
+python infrastructure/cloudwatch_setup.py
+```
+
+### Team Deployment Checklist
+
+Before sharing with your team, ensure:
+- [ ] `.env.example` file exists with all required variables
+- [ ] `requirements.txt` contains all dependencies
+- [ ] Infrastructure setup scripts work
+- [ ] README has clear deployment instructions
+- [ ] AWS permissions are documented
+- [ ] Troubleshooting guide is complete
+
+## Monitoring Commands
+```bash
+# Live conversation logs
+aws logs tail "/aws/svl/conversation" --follow --region us-east-1
+
+# Search logs
+aws logs filter-log-events --log-group-name "/aws/svl/conversation" --filter-pattern "{ $.query_type = \"pricing_inquiry\" }" --region us-east-1
+```
 
 ## Model Support
 
@@ -136,4 +225,17 @@ svl-chatbot/
 - [Streamlit Documentation](https://docs.streamlit.io/)
 - [AWS Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
 - [AWS DynamoDB Documentation](https://docs.aws.amazon.com/dynamodb/)
-- [Python Logging](https://docs.python.org/3/library/logging.html) 
+- [Python Logging](https://docs.python.org/3/library/logging.html)
+
+## Observability & Monitoring
+
+### CloudWatch Log Groups
+- `/aws/svl/conversation` - All user interactions (PII-masked)
+- `/aws/svl/api-requests` - API call metrics  
+- `/aws/svl/errors` - Error tracking
+
+### Quick Access
+- **Dashboard**: [SVL CloudWatch Dashboard](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=SVL-Chatbot-Comprehensive-Monitoring)
+- **Live Logs**: `aws logs tail "/aws/svl/conversation" --follow --region us-east-1`
+
+All logs automatically mask PII (SSN, phone, email, names, addresses). 

@@ -10,12 +10,13 @@ from config.aws_config import get_bedrock_client, get_model_id, is_nova_model, i
 from utils.database_manager import DatabaseManager
 from utils.logger import get_logger
 
-# Knowledge base import with graceful fallback
+# Knowledge base import - using new Bedrock Knowledge Base
 try:
-    from utils.knowledge_base import KnowledgeBase
+    from utils.bedrock_knowledge_base import BedrockKnowledgeBaseManager
+    from utils.observability import observability, trace_function
     KNOWLEDGE_BASE_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f"Knowledge base not available: {e}")
+    logger.warning(f"Bedrock Knowledge base not available: {e}")
     KNOWLEDGE_BASE_AVAILABLE = False
 
 logger = get_logger("conversation_manager")
@@ -55,12 +56,14 @@ def build_prompt(phase: str, user_input: str, memory: ConversationMemory, extra:
         "You are SVL, an empathetic but professional assistant helping users report and locate stolen vehicles. "
         "Always protect user privacy, never request or reveal sensitive PERSONAL information (like SSNs, credit cards). "
         "However, ALWAYS provide company contact information when requested - this is public information that helps users. "
+        "You can and should discuss pricing, costs, and service fees as these are legitimate business topics that help customers understand our services. "
         "Be concise, clear, and supportive."
     )
     
     # Add contact information context if the user is asking for contact details
     contact_keywords = ["contact", "phone", "email", "call", "reach", "support", "help", "toll free", "number"]
     ticket_keywords = ["ticket", "case", "lost", "find", "lookup", "forgot"]
+    pricing_keywords = ["price", "cost", "fee", "charge", "payment", "billing", "offer", "pricing", "expensive", "cheap", "money"]
     
     if any(keyword in user_input.lower() for keyword in contact_keywords):
         contact_info = """
@@ -90,6 +93,14 @@ IMPORTANT: You can and should provide these SVL contact details when asked:
 Always provide specific contact information when users ask for it. This is public company information.
 """
         base_instructions += contact_info
+    
+    # Add pricing information context if the user is asking about pricing
+    if any(keyword in user_input.lower() for keyword in pricing_keywords):
+        pricing_info = """
+
+PRICING ASSISTANCE: You are authorized and encouraged to discuss SVL service pricing and costs. This is normal business information that helps customers make informed decisions. You can provide general pricing information, direct users to our sales team for detailed quotes, and discuss payment options. Pricing discussions are completely appropriate and expected for a business service.
+"""
+        base_instructions += pricing_info
     
     # Add ticket lookup assistance
     if any(keyword in user_input.lower() for keyword in ticket_keywords):
@@ -192,16 +203,11 @@ class ConversationManager:
         self.knowledge_base = None
         if KNOWLEDGE_BASE_AVAILABLE:
             try:
-                self.knowledge_base = KnowledgeBase()
-                # Try to initialize the knowledge base
-                if not self.knowledge_base.is_ready():
-                    init_result = self.knowledge_base.initialize_knowledge_base()
-                    if init_result["status"] == "success":
-                        logger.info("Knowledge base initialized successfully")
-                    else:
-                        logger.warning(f"Knowledge base initialization issues: {init_result}")
+                self.knowledge_base = BedrockKnowledgeBaseManager()
+                # Bedrock Knowledge Base is ready by default - no initialization needed
+                logger.info("Bedrock Knowledge Base manager initialized successfully")
             except Exception as e:
-                logger.error(f"Failed to initialize knowledge base: {e}")
+                logger.error(f"Failed to initialize Bedrock Knowledge Base: {e}")
                 self.knowledge_base = None
 
     def process_user_input(self, user_input: str, phase: str, extra: Optional[Dict[str, Any]] = None) -> str:
@@ -221,21 +227,30 @@ class ConversationManager:
         knowledge_context = None
         if self.knowledge_base and self.knowledge_base.is_ready():
             try:
-                # Determine query type based on phase and user input
-                query_type = self._determine_query_type(phase, user_input)
-                
-                # Query knowledge base
+                # Query knowledge base using new Bedrock API
                 kb_result = self.knowledge_base.query_knowledge_base(
-                    user_query=user_input,
-                    query_type=query_type,
-                    include_context=True
+                    query=user_input,
+                    max_results=3,
+                    similarity_threshold=0.7
                 )
                 
                 if kb_result["status"] == "success" and kb_result.get("total_results", 0) > 0:
+                    # Build context from results
+                    context_parts = []
+                    sources = []
+                    
+                    for result in kb_result["results"]:
+                        context_parts.append(f"Source: {result['source']}\nContent: {result['text']}")
+                        sources.append({
+                            "source": result["source"],
+                            "title": result["document_title"],
+                            "score": result["score"]
+                        })
+                    
                     knowledge_context = {
-                        "knowledge_base_context": kb_result["context"],
-                        "sources": kb_result["sources"],
-                        "confidence": kb_result["confidence"]
+                        "knowledge_base_context": "\n\n".join(context_parts),
+                        "sources": sources,
+                        "confidence": sum(r["score"] for r in kb_result["results"]) / len(kb_result["results"])
                     }
                     logger.info(f"Knowledge base found {kb_result['total_results']} relevant results")
                 else:
@@ -413,16 +428,16 @@ class ConversationManager:
     def get_knowledge_base_stats(self) -> Dict[str, Any]:
         """Get knowledge base statistics"""
         if self.knowledge_base:
-            return self.knowledge_base.get_knowledge_base_stats()
+            return self.knowledge_base.get_stats()
         else:
-            return {"status": "not_available", "message": "Knowledge base not initialized"}
+            return {"status": "not_available", "message": "Bedrock Knowledge base not initialized"}
     
     def get_knowledge_base_health(self) -> Dict[str, Any]:
         """Get knowledge base health status"""
         if self.knowledge_base:
-            return self.knowledge_base.get_health_status()
+            return self.knowledge_base.check_knowledge_base_status()
         else:
-            return {"status": "unavailable", "message": "Knowledge base not initialized"}
+            return {"status": "unavailable", "message": "Bedrock Knowledge base not initialized"}
 
     def get_memory(self) -> List[Dict[str, str]]:
         return self.memory.get_context() 
